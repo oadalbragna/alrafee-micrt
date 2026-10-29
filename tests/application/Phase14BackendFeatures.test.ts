@@ -121,6 +121,10 @@ class InMemoryPackageRepository implements IPackageRepository {
   async delete(): Promise<void> {
     throw new Error('Not implemented');
   }
+
+  async checkUsage(): Promise<any> {
+    return { inUse: false, cardsCount: 0, batchesCount: 0 };
+  }
 }
 
 describe('Phase 14: Trial Period Lock & Numbers-Only Card Generation', () => {

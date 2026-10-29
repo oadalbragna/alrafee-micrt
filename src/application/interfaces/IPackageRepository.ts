@@ -54,10 +54,17 @@ export interface UpdatePackageData {
   isActive?: boolean | undefined;
 }
 
+export interface PackageUsage {
+  inUse: boolean;
+  cardsCount: number;
+  batchesCount: number;
+}
+
 export interface IPackageRepository {
   create(data: CreatePackageData): Promise<Package>;
   findById(id: string, tenantId: string): Promise<Package | null>;
   findAllByTenant(tenantId: string): Promise<Package[]>;
   update(id: string, tenantId: string, data: UpdatePackageData): Promise<Package>;
   delete(id: string, tenantId: string): Promise<void>;
+  checkUsage(id: string, tenantId: string): Promise<PackageUsage>;
 }

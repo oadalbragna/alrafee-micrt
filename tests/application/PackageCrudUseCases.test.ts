@@ -11,6 +11,7 @@ import assert from 'node:assert/strict';
 import {
   IPackageRepository,
   Package,
+  PackageUsage,
   CreatePackageData,
   UpdatePackageData,
 } from '../../src/application/interfaces/IPackageRepository.js';
@@ -138,6 +139,17 @@ class InMemoryPackageRepository implements IPackageRepository {
 
     this.packages[index] = updated;
     return { ...updated };
+  }
+
+  public usageMap = new Map<string, { cardsCount: number; batchesCount: number }>();
+
+  async checkUsage(id: string, tenantId: string): Promise<PackageUsage> {
+    const stats = this.usageMap.get(id) ?? { cardsCount: 0, batchesCount: 0 };
+    return {
+      inUse: stats.cardsCount > 0 || stats.batchesCount > 0,
+      cardsCount: stats.cardsCount,
+      batchesCount: stats.batchesCount,
+    };
   }
 
   async delete(id: string, tenantId: string): Promise<void> {

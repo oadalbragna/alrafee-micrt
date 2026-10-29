@@ -18,6 +18,7 @@ import { PrismaPackageRepository } from '../../../infrastructure/database/reposi
 import { AuditLogger } from '../../../infrastructure/logging/AuditLogger.js';
 import { authMiddleware } from '../middlewares/authMiddleware.js';
 import { subscriptionMiddleware } from '../middlewares/subscriptionMiddleware.js';
+import { handlePrismaOrServerError } from '../errors/prismaErrorHandler.js';
 
 export const packageRoutes: FastifyPluginAsync = async (
   fastify: FastifyInstance
@@ -63,20 +64,7 @@ export const packageRoutes: FastifyPluginAsync = async (
         data: pkg,
       });
     } catch (err: any) {
-      if (err.code === 'P2002' || err.message?.includes('Unique constraint')) {
-        return reply.status(409).send({
-          success: false,
-          errorCode: 'PACKAGE_CODE_EXISTS',
-          errorMessage: 'A package with this code already exists for this tenant',
-        });
-      }
-
-      fastify.log.error(err, 'Failed to create package');
-      return reply.status(500).send({
-        success: false,
-        errorCode: 'INTERNAL_ERROR',
-        errorMessage: err.message || 'Failed to create package',
-      });
+      return handlePrismaOrServerError(err, reply, fastify.log, 'فشل إنشاء الباقة');
     }
   });
 
@@ -96,12 +84,7 @@ export const packageRoutes: FastifyPluginAsync = async (
         data: packages,
       });
     } catch (err: any) {
-      fastify.log.error(err, 'Failed to list packages');
-      return reply.status(500).send({
-        success: false,
-        errorCode: 'INTERNAL_ERROR',
-        errorMessage: err.message || 'Failed to list packages',
-      });
+      return handlePrismaOrServerError(err, reply, fastify.log, 'فشل جلب قائمة الباقات');
     }
   });
 
@@ -144,28 +127,7 @@ export const packageRoutes: FastifyPluginAsync = async (
         data: updated,
       });
     } catch (err: any) {
-      if (err.message?.includes('not found')) {
-        return reply.status(404).send({
-          success: false,
-          errorCode: 'PACKAGE_NOT_FOUND',
-          errorMessage: err.message,
-        });
-      }
-
-      if (err.code === 'P2002' || err.message?.includes('Unique constraint')) {
-        return reply.status(409).send({
-          success: false,
-          errorCode: 'PACKAGE_CODE_EXISTS',
-          errorMessage: 'A package with this code already exists for this tenant',
-        });
-      }
-
-      fastify.log.error(err, 'Failed to update package');
-      return reply.status(500).send({
-        success: false,
-        errorCode: 'INTERNAL_ERROR',
-        errorMessage: err.message || 'Failed to update package',
-      });
+      return handlePrismaOrServerError(err, reply, fastify.log, 'فشل تحديث بيانات الباقة');
     }
   });
 
@@ -197,20 +159,12 @@ export const packageRoutes: FastifyPluginAsync = async (
         message: 'Package deleted successfully',
       });
     } catch (err: any) {
-      if (err.message?.includes('not found')) {
-        return reply.status(404).send({
-          success: false,
-          errorCode: 'PACKAGE_NOT_FOUND',
-          errorMessage: err.message,
-        });
-      }
-
-      fastify.log.error(err, 'Failed to delete package');
-      return reply.status(500).send({
-        success: false,
-        errorCode: 'INTERNAL_ERROR',
-        errorMessage: err.message || 'Failed to delete package',
-      });
+      return handlePrismaOrServerError(
+        err,
+        reply,
+        fastify.log,
+        'فشل حذف الباقة بسبب خطأ غير متوقع في الخادم'
+      );
     }
   });
 };

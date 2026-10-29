@@ -10,9 +10,11 @@ import { prisma as defaultPrisma } from '../prisma.js';
 import {
   IPackageRepository,
   Package,
+  PackageUsage,
   CreatePackageData,
   UpdatePackageData,
 } from '../../../application/interfaces/IPackageRepository.js';
+import { PackageInUseException } from '../../../domain/exceptions/PackageInUseException.js';
 
 export class PrismaPackageRepository implements IPackageRepository {
   constructor(private readonly prisma: PrismaClient = defaultPrisma) {}
@@ -96,6 +98,23 @@ export class PrismaPackageRepository implements IPackageRepository {
     return this.mapToPackage(updated);
   }
 
+  async checkUsage(id: string, tenantId: string): Promise<PackageUsage> {
+    const [cardsCount, batchesCount] = await Promise.all([
+      this.prisma.card.count({
+        where: { packageId: id, tenantId },
+      }),
+      this.prisma.cardBatch.count({
+        where: { packageId: id, tenantId },
+      }),
+    ]);
+
+    return {
+      inUse: cardsCount > 0 || batchesCount > 0,
+      cardsCount,
+      batchesCount,
+    };
+  }
+
   async delete(id: string, tenantId: string): Promise<void> {
     const existing = await this.prisma.package.findFirst({
       where: { id, tenantId },
@@ -105,9 +124,24 @@ export class PrismaPackageRepository implements IPackageRepository {
       throw new Error(`Package with id ${id} not found for tenant ${tenantId}`);
     }
 
-    await this.prisma.package.delete({
-      where: { id },
-    });
+    try {
+      await this.prisma.package.delete({
+        where: { id },
+      });
+    } catch (err: any) {
+      const errStr = String(err?.message || '');
+      const errCode = String(err?.code || '');
+      if (
+        errStr.includes('RestrictViolation') ||
+        errStr.includes('foreign key constraint') ||
+        errStr.includes('Foreign key constraint') ||
+        errStr.includes('violates foreign key') ||
+        errCode === 'P2003'
+      ) {
+        throw new PackageInUseException('لا يمكن حذف باقة مرتبطة بكروت أو دفعات سابقة');
+      }
+      throw err;
+    }
   }
 
   private mapToPackage(record: any): Package {

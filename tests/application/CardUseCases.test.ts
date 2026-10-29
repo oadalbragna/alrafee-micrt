@@ -156,6 +156,10 @@ class InMemoryPackageRepository implements IPackageRepository {
     const index = this.packages.findIndex((p) => p.id === id && p.tenantId === tenantId);
     if (index !== -1) this.packages.splice(index, 1);
   }
+
+  async checkUsage(id: string, tenantId: string): Promise<any> {
+    return { inUse: false, cardsCount: 0, batchesCount: 0 };
+  }
 }
 
 class InMemoryCardBatchRepository implements ICardBatchRepository {

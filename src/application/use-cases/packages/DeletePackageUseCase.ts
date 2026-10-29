@@ -6,6 +6,7 @@
 
 import { IPackageRepository } from '../../interfaces/IPackageRepository.js';
 import { IAuditLogger } from '../../interfaces/IAuditLogger.js';
+import { PackageInUseException } from '../../../domain/exceptions/PackageInUseException.js';
 
 export interface DeletePackageInput {
   id: string;
@@ -27,6 +28,23 @@ export class DeletePackageUseCase {
       throw new Error('Tenant ID is required for deletion');
     }
 
+    // 1. Verify existence and tenant ownership
+    const existing = await this.packageRepository.findById(input.id, input.tenantId);
+    if (!existing) {
+      throw new Error(`Package with id ${input.id} not found for tenant ${input.tenantId}`);
+    }
+
+    // 2. Pre-check if package is linked to active cards or batches
+    const usage = await this.packageRepository.checkUsage(input.id, input.tenantId);
+    if (usage.inUse) {
+      throw new PackageInUseException(
+        'لا يمكن حذف باقة مرتبطة بكروت أو دفعات سابقة',
+        usage.cardsCount,
+        usage.batchesCount
+      );
+    }
+
+    // 3. Safe deletion
     await this.packageRepository.delete(input.id, input.tenantId);
 
     if (this.auditLogger) {
@@ -36,7 +54,7 @@ export class DeletePackageUseCase {
         'DELETE',
         'Package',
         input.id,
-        `Deleted package ${input.id}`,
+        `Deleted package "${existing.name}" (${input.id})`,
         'SUCCESS'
       );
     }
