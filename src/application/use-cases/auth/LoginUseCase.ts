@@ -66,6 +66,46 @@ export class LoginUseCase {
       throw new InvalidCredentialsException('بيانات الدخول غير صحيحة');
     }
 
+    // 1. Verify password FIRST before checking account or tenant status to prevent enumeration
+    const isMatch = await verifyPassword(input.password, user.passwordHash);
+    if (!isMatch) {
+      if (this.auditLogger) {
+        await this.auditLogger.log(
+          user.tenantId,
+          user.id,
+          'LOGIN',
+          'User',
+          user.id,
+          `Failed login attempt for user "${user.username}"`,
+          'FAILURE'
+        );
+      }
+      throw new InvalidCredentialsException('بيانات الدخول غير صحيحة');
+    }
+
+    // 2. Tenant-level archive, approval, and suspension lookup
+    const tenant = await this.prisma.tenant.findUnique({
+      where: { id: user.tenantId },
+    });
+
+    if (tenant && tenant.isDeleted) {
+      if (this.auditLogger) {
+        await this.auditLogger.log(
+          user.tenantId,
+          user.id,
+          'LOGIN',
+          'User',
+          user.id,
+          `Login attempt for archived tenant "${tenant.name}" by user "${user.username}"`,
+          'FAILURE'
+        );
+      }
+      throw new InactiveUserException(
+        'هذا الحساب غير نشط حالياً. للاستفسار أو طلب استعادة الحساب، يرجى التواصل مع فريق الدعم الفني.'
+      );
+    }
+
+    // 3. User-level status enforcement
     if (user.status === 'INACTIVE' || user.status !== 'ACTIVE') {
       if (this.auditLogger) {
         await this.auditLogger.log(
@@ -81,15 +121,8 @@ export class LoginUseCase {
       throw new InactiveUserException('هذا الحساب معطل، يرجى التواصل مع مسؤول النظام');
     }
 
-    // Tenant-level approval, deletion, and suspension enforcement
-    const tenant = await this.prisma.tenant.findUnique({
-      where: { id: user.tenantId },
-    });
-
+    // 4. Tenant-level approval and suspension enforcement
     if (tenant) {
-      if (tenant.isDeleted) {
-        throw new InactiveUserException('هذا الحساب محذوف، يرجى التواصل مع مسؤول النظام');
-      }
       if (tenant.approvalStatus === 'PENDING') {
         throw new PendingApprovalException('حسابك قيد المراجعة من الإدارة');
       }
@@ -99,22 +132,6 @@ export class LoginUseCase {
       if (tenant.subscriptionStatus === 'SUSPENDED') {
         throw new InactiveUserException('تم إيقاف هذا الحساب مؤقتاً، يرجى التواصل مع إدارة المنصة');
       }
-    }
-
-    const isMatch = await verifyPassword(input.password, user.passwordHash);
-    if (!isMatch) {
-      if (this.auditLogger) {
-        await this.auditLogger.log(
-          user.tenantId,
-          user.id,
-          'LOGIN',
-          'User',
-          user.id,
-          `Failed login attempt for user "${user.username}"`,
-          'FAILURE'
-        );
-      }
-      throw new InvalidCredentialsException('بيانات الدخول غير صحيحة');
     }
 
     // ------------------------------------------------------------------------

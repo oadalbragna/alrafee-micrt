@@ -28,6 +28,12 @@ import { RejectTenantUseCase } from '../../../application/use-cases/admin/Reject
 import { SuspendTenantUseCase } from '../../../application/use-cases/admin/SuspendTenantUseCase.js';
 import { ReactivateTenantUseCase } from '../../../application/use-cases/admin/ReactivateTenantUseCase.js';
 import { DeleteTenantUseCase } from '../../../application/use-cases/admin/DeleteTenantUseCase.js';
+import { ListArchivedTenantsUseCase } from '../../../application/use-cases/admin/ListArchivedTenantsUseCase.js';
+import { RestoreTenantUseCase } from '../../../application/use-cases/admin/RestoreTenantUseCase.js';
+import {
+  PermanentDeleteTenantUseCase,
+  PermanentDeleteTenantException,
+} from '../../../application/use-cases/admin/PermanentDeleteTenantUseCase.js';
 import { UpdateUserRoleUseCase } from '../../../application/use-cases/admin/UpdateUserRoleUseCase.js';
 import { AdminActivateTenantUseCase } from '../../../application/use-cases/admin/AdminActivateTenantUseCase.js';
 import { ListTenantUsersUseCase } from '../../../application/use-cases/admin/ListTenantUsersUseCase.js';
@@ -53,6 +59,9 @@ export const adminRoutes: FastifyPluginAsync = async (
   const suspendTenantUseCase = new SuspendTenantUseCase();
   const reactivateTenantUseCase = new ReactivateTenantUseCase();
   const deleteTenantUseCase = new DeleteTenantUseCase();
+  const listArchivedTenantsUseCase = new ListArchivedTenantsUseCase();
+  const restoreTenantUseCase = new RestoreTenantUseCase();
+  const permanentDeleteTenantUseCase = new PermanentDeleteTenantUseCase();
   const updateUserRoleUseCase = new UpdateUserRoleUseCase();
   const adminActivateTenantUseCase = new AdminActivateTenantUseCase();
   const listTenantUsersUseCase = new ListTenantUsersUseCase();
@@ -211,6 +220,93 @@ export const adminRoutes: FastifyPluginAsync = async (
         success: false,
         errorCode: 'OPERATION_FAILED',
         errorMessage: err.message || 'فشل حذف الحساب',
+      });
+    }
+  });
+
+  // --------------------------------------------------------------------------
+  // 6b. GET /api/v1/admin/tenants/archived (List all archived tenants)
+  // --------------------------------------------------------------------------
+  fastify.get('/tenants/archived', async (_request, reply) => {
+    try {
+      const archivedTenants = await listArchivedTenantsUseCase.execute();
+      return reply.status(200).send({
+        success: true,
+        data: archivedTenants,
+      });
+    } catch (err: any) {
+      fastify.log.error(err, 'Failed to list archived tenants for super admin');
+      return reply.status(500).send({
+        success: false,
+        errorCode: 'INTERNAL_ERROR',
+        errorMessage: err.message || 'فشل جلب قائمة الحسابات المؤرشفة',
+      });
+    }
+  });
+
+  // --------------------------------------------------------------------------
+  // 6c. PATCH /api/v1/admin/tenants/:id/restore (Restore archived tenant)
+  // --------------------------------------------------------------------------
+  fastify.patch('/tenants/:id/restore', async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const { userId } = request.user!;
+
+    try {
+      const result = await restoreTenantUseCase.execute({
+        tenantId: id,
+        adminUserId: userId,
+      });
+
+      return reply.status(200).send({
+        success: true,
+        data: result,
+        message: result.message,
+      });
+    } catch (err: any) {
+      fastify.log.error(err, 'Failed to restore archived tenant');
+      return reply.status(400).send({
+        success: false,
+        errorCode: 'OPERATION_FAILED',
+        errorMessage: err.message || 'فشل استرجاع الحساب من الأرشيف',
+      });
+    }
+  });
+
+  // --------------------------------------------------------------------------
+  // 6d. DELETE /api/v1/admin/tenants/:id/permanent (Permanent physical delete)
+  // --------------------------------------------------------------------------
+  fastify.delete('/tenants/:id/permanent', async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const { userId, tenantId: adminTenantId } = request.user!;
+    const body = (request.body as { confirmName?: string } | null | undefined) || {};
+
+    try {
+      const result = await permanentDeleteTenantUseCase.execute({
+        tenantId: id,
+        confirmName: typeof body.confirmName === 'string' ? body.confirmName : '',
+        adminUserId: userId,
+        adminTenantId,
+      });
+
+      return reply.status(200).send({
+        success: true,
+        data: result,
+        message: result.message,
+      });
+    } catch (err: any) {
+      if (err instanceof PermanentDeleteTenantException || err.name === 'PermanentDeleteTenantException') {
+        return reply.status(err.statusCode || 400).send({
+          success: false,
+          errorCode: err.errorCode || 'OPERATION_FAILED',
+          errorMessage: err.message,
+        });
+      }
+
+      fastify.log.error(err, 'Failed to permanently delete archived tenant');
+      return reply.status(400).send({
+        success: false,
+        errorCode: 'OPERATION_FAILED',
+        errorMessage: err.message || 'فشل الحذف النهائي للحساب',
       });
     }
   });
