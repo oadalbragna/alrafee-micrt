@@ -855,4 +855,353 @@ describe('Tenant Archive, Restore, Permanent Delete, Login Security & Self-Delet
       }
     });
   });
+
+  // --------------------------------------------------------------------------
+  // 5. Comprehensive Login Matrix (All States + Wrong Password + Archived Staff)
+  // --------------------------------------------------------------------------
+  describe('5. Comprehensive Login Matrix (All States + Wrong Password + Archived Staff)', () => {
+    const validPass = 'MatrixPass123!';
+    const wrongPass = 'WrongMatrixPass999!';
+
+    let activeTenantId: string;
+    let activeUserEmail: string;
+    let inactiveUserUsername: string;
+
+    let pendingTenantId: string;
+    let pendingUserUsername: string;
+
+    let suspendedTenantId: string;
+    let suspendedUserUsername: string;
+
+    let expiredTrialTenantId: string;
+    let expiredTrialUsername: string;
+
+    let archivedTenantId: string;
+    let archivedStaffUsername: string;
+
+    before(async () => {
+      const ts = Date.now();
+      const hashed = await hashPassword(validPass);
+
+      // 1. Active Tenant (with normal active user + inactive user)
+      activeTenantId = randomUUID();
+      await prisma.tenant.create({
+        data: {
+          id: activeTenantId,
+          name: 'Active Matrix Network',
+          slug: `matrix-active-${ts}`,
+          status: 'ACTIVE',
+          subscriptionStatus: 'ACTIVE',
+          approvalStatus: 'APPROVED',
+        },
+      });
+      createdTenantIds.push(activeTenantId);
+
+      activeUserEmail = `matrix_active_${ts}@local.test`;
+      await prisma.user.create({
+        data: {
+          id: randomUUID(),
+          tenantId: activeTenantId,
+          username: `matrix_active_${ts}`,
+          email: activeUserEmail,
+          passwordHash: hashed,
+          fullName: 'Active Owner',
+          role: 'TENANT_ADMIN',
+          status: 'ACTIVE',
+        },
+      });
+
+      inactiveUserUsername = `matrix_inactive_${ts}`;
+      await prisma.user.create({
+        data: {
+          id: randomUUID(),
+          tenantId: activeTenantId,
+          username: inactiveUserUsername,
+          passwordHash: hashed,
+          fullName: 'Inactive Staff',
+          role: 'OPERATOR',
+          status: 'INACTIVE',
+        },
+      });
+
+      // 2. Pending Approval Tenant
+      pendingTenantId = randomUUID();
+      await prisma.tenant.create({
+        data: {
+          id: pendingTenantId,
+          name: 'Pending Matrix Network',
+          slug: `matrix-pending-${ts}`,
+          status: 'ACTIVE',
+          subscriptionStatus: 'TRIAL',
+          approvalStatus: 'PENDING',
+        },
+      });
+      createdTenantIds.push(pendingTenantId);
+
+      pendingUserUsername = `matrix_pending_${ts}`;
+      await prisma.user.create({
+        data: {
+          id: randomUUID(),
+          tenantId: pendingTenantId,
+          username: pendingUserUsername,
+          passwordHash: hashed,
+          fullName: 'Pending Owner',
+          role: 'TENANT_ADMIN',
+          status: 'ACTIVE',
+        },
+      });
+
+      // 3. Suspended Tenant
+      suspendedTenantId = randomUUID();
+      await prisma.tenant.create({
+        data: {
+          id: suspendedTenantId,
+          name: 'Suspended Matrix Network',
+          slug: `matrix-suspended-${ts}`,
+          status: 'ACTIVE',
+          subscriptionStatus: 'SUSPENDED',
+          approvalStatus: 'APPROVED',
+        },
+      });
+      createdTenantIds.push(suspendedTenantId);
+
+      suspendedUserUsername = `matrix_suspended_${ts}`;
+      await prisma.user.create({
+        data: {
+          id: randomUUID(),
+          tenantId: suspendedTenantId,
+          username: suspendedUserUsername,
+          passwordHash: hashed,
+          fullName: 'Suspended Owner',
+          role: 'TENANT_ADMIN',
+          status: 'ACTIVE',
+        },
+      });
+
+      // 4. Expired Trial Tenant
+      expiredTrialTenantId = randomUUID();
+      await prisma.tenant.create({
+        data: {
+          id: expiredTrialTenantId,
+          name: 'Expired Trial Matrix Network',
+          slug: `matrix-expired-${ts}`,
+          status: 'ACTIVE',
+          subscriptionStatus: 'EXPIRED',
+          approvalStatus: 'APPROVED',
+          trialEndsAt: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000),
+        },
+      });
+      createdTenantIds.push(expiredTrialTenantId);
+
+      expiredTrialUsername = `matrix_expired_${ts}`;
+      await prisma.user.create({
+        data: {
+          id: randomUUID(),
+          tenantId: expiredTrialTenantId,
+          username: expiredTrialUsername,
+          passwordHash: hashed,
+          fullName: 'Expired Trial Owner',
+          role: 'TENANT_ADMIN',
+          status: 'ACTIVE',
+        },
+      });
+
+      // 5. Archived Tenant with an Employee (OPERATOR, not TENANT_ADMIN)
+      archivedTenantId = randomUUID();
+      await prisma.tenant.create({
+        data: {
+          id: archivedTenantId,
+          name: 'Archived Matrix Network',
+          slug: `matrix-archived-${ts}`,
+          status: 'INACTIVE',
+          subscriptionStatus: 'ACTIVE',
+          approvalStatus: 'APPROVED',
+          isDeleted: true,
+          deletedAt: new Date(),
+        },
+      });
+      createdTenantIds.push(archivedTenantId);
+
+      archivedStaffUsername = `matrix_arch_staff_${ts}`;
+      await prisma.user.create({
+        data: {
+          id: randomUUID(),
+          tenantId: archivedTenantId,
+          username: archivedStaffUsername,
+          passwordHash: hashed,
+          fullName: 'Archived Network Employee',
+          role: 'OPERATOR',
+          status: 'ACTIVE',
+        },
+      });
+    });
+
+    it('1) Normal Active User: wrong password -> 401, right password -> 200 with JWT', async () => {
+      const wrongRes = await app.inject({
+        method: 'POST',
+        url: '/api/v1/auth/login',
+        payload: { identifier: activeUserEmail, password: wrongPass },
+      });
+      assert.strictEqual(wrongRes.statusCode, 401);
+      assert.strictEqual(JSON.parse(wrongRes.body).errorCode, 'INVALID_CREDENTIALS');
+
+      const okRes = await app.inject({
+        method: 'POST',
+        url: '/api/v1/auth/login',
+        payload: { identifier: activeUserEmail, password: validPass },
+      });
+      assert.strictEqual(okRes.statusCode, 200);
+      assert.ok(JSON.parse(okRes.body).data.token);
+    });
+
+    it('2) New Device (OTP challenge in NODE_ENV=test): wrong password -> 401, right password -> 200 requiresDeviceVerification', async () => {
+      const wrongRes = await app.inject({
+        method: 'POST',
+        url: '/api/v1/auth/login',
+        payload: {
+          identifier: activeUserEmail,
+          password: wrongPass,
+          deviceFingerprint: `fp-new-${Date.now()}`,
+          deviceLabel: 'Test Android Phone',
+        },
+      });
+      assert.strictEqual(wrongRes.statusCode, 401);
+      assert.strictEqual(JSON.parse(wrongRes.body).errorCode, 'INVALID_CREDENTIALS');
+
+      const otpRes = await app.inject({
+        method: 'POST',
+        url: '/api/v1/auth/login',
+        payload: {
+          identifier: activeUserEmail,
+          password: validPass,
+          deviceFingerprint: `fp-new-${Date.now()}`,
+          deviceLabel: 'Test Android Phone',
+        },
+      });
+      assert.strictEqual(otpRes.statusCode, 200);
+      const body = JSON.parse(otpRes.body);
+      assert.strictEqual(body.data.requiresDeviceVerification, true);
+      assert.ok(body.data.tempToken);
+    });
+
+    it('3) Pending Tenant (PENDING): wrong password -> 401, right password -> 403 ACCOUNT_PENDING_APPROVAL', async () => {
+      const wrongRes = await app.inject({
+        method: 'POST',
+        url: '/api/v1/auth/login',
+        payload: { identifier: pendingUserUsername, password: wrongPass },
+      });
+      assert.strictEqual(wrongRes.statusCode, 401);
+      assert.strictEqual(JSON.parse(wrongRes.body).errorCode, 'INVALID_CREDENTIALS');
+
+      const pendingRes = await app.inject({
+        method: 'POST',
+        url: '/api/v1/auth/login',
+        payload: { identifier: pendingUserUsername, password: validPass },
+      });
+      assert.strictEqual(pendingRes.statusCode, 403);
+      assert.strictEqual(JSON.parse(pendingRes.body).errorCode, 'ACCOUNT_PENDING_APPROVAL');
+    });
+
+    it('4) Suspended Tenant (SUSPENDED): wrong password -> 401, right password -> 403 ACCOUNT_INACTIVE', async () => {
+      const wrongRes = await app.inject({
+        method: 'POST',
+        url: '/api/v1/auth/login',
+        payload: { identifier: suspendedUserUsername, password: wrongPass },
+      });
+      assert.strictEqual(wrongRes.statusCode, 401);
+      assert.strictEqual(JSON.parse(wrongRes.body).errorCode, 'INVALID_CREDENTIALS');
+
+      const suspRes = await app.inject({
+        method: 'POST',
+        url: '/api/v1/auth/login',
+        payload: { identifier: suspendedUserUsername, password: validPass },
+      });
+      assert.strictEqual(suspRes.statusCode, 403);
+      const body = JSON.parse(suspRes.body);
+      assert.strictEqual(body.errorCode, 'ACCOUNT_INACTIVE');
+      assert.strictEqual(body.errorMessage, 'تم إيقاف هذا الحساب مؤقتاً، يرجى التواصل مع إدارة المنصة');
+    });
+
+    it('5) Expired Trial Tenant (EXPIRED): wrong password -> 401, right password -> 200 (allows login for renewal)', async () => {
+      const wrongRes = await app.inject({
+        method: 'POST',
+        url: '/api/v1/auth/login',
+        payload: { identifier: expiredTrialUsername, password: wrongPass },
+      });
+      assert.strictEqual(wrongRes.statusCode, 401);
+      assert.strictEqual(JSON.parse(wrongRes.body).errorCode, 'INVALID_CREDENTIALS');
+
+      const okRes = await app.inject({
+        method: 'POST',
+        url: '/api/v1/auth/login',
+        payload: { identifier: expiredTrialUsername, password: validPass },
+      });
+      assert.strictEqual(okRes.statusCode, 200);
+      assert.ok(JSON.parse(okRes.body).data.token);
+    });
+
+    it('6) Inactive User (INACTIVE): wrong password -> 401, right password -> 403 ACCOUNT_INACTIVE', async () => {
+      const wrongRes = await app.inject({
+        method: 'POST',
+        url: '/api/v1/auth/login',
+        payload: { identifier: inactiveUserUsername, password: wrongPass },
+      });
+      assert.strictEqual(wrongRes.statusCode, 401);
+      assert.strictEqual(JSON.parse(wrongRes.body).errorCode, 'INVALID_CREDENTIALS');
+
+      const inactiveRes = await app.inject({
+        method: 'POST',
+        url: '/api/v1/auth/login',
+        payload: { identifier: inactiveUserUsername, password: validPass },
+      });
+      assert.strictEqual(inactiveRes.statusCode, 403);
+      const body = JSON.parse(inactiveRes.body);
+      assert.strictEqual(body.errorCode, 'ACCOUNT_INACTIVE');
+      assert.strictEqual(body.errorMessage, 'هذا الحساب معطل، يرجى التواصل مع مسؤول النظام');
+    });
+
+    it('7) Super Admin (SUPER_ADMIN): wrong password -> 401, right password -> 200 with SUPER_ADMIN role', async () => {
+      const superUser = await prisma.user.findUniqueOrThrow({ where: { id: superAdminUserId } });
+
+      const wrongRes = await app.inject({
+        method: 'POST',
+        url: '/api/v1/auth/login',
+        payload: { identifier: superUser.username, password: wrongPass },
+      });
+      assert.strictEqual(wrongRes.statusCode, 401);
+      assert.strictEqual(JSON.parse(wrongRes.body).errorCode, 'INVALID_CREDENTIALS');
+
+      const okRes = await app.inject({
+        method: 'POST',
+        url: '/api/v1/auth/login',
+        payload: { identifier: superUser.username, password: 'SuperPass123!' },
+      });
+      assert.strictEqual(okRes.statusCode, 200);
+      const body = JSON.parse(okRes.body);
+      assert.strictEqual(body.data.user.role, 'SUPER_ADMIN');
+    });
+
+    it('8) Employee (OPERATOR) of an Archived Tenant: wrong password -> 401, right password -> 403 ACCOUNT_INACTIVE with unified support message', async () => {
+      const wrongRes = await app.inject({
+        method: 'POST',
+        url: '/api/v1/auth/login',
+        payload: { identifier: archivedStaffUsername, password: wrongPass },
+      });
+      assert.strictEqual(wrongRes.statusCode, 401);
+      assert.strictEqual(JSON.parse(wrongRes.body).errorCode, 'INVALID_CREDENTIALS');
+
+      const rightRes = await app.inject({
+        method: 'POST',
+        url: '/api/v1/auth/login',
+        payload: { identifier: archivedStaffUsername, password: validPass },
+      });
+      assert.strictEqual(rightRes.statusCode, 403);
+      const body = JSON.parse(rightRes.body);
+      assert.strictEqual(body.errorCode, 'ACCOUNT_INACTIVE');
+      assert.strictEqual(
+        body.errorMessage,
+        'هذا الحساب غير نشط حالياً. للاستفسار أو طلب استعادة الحساب، يرجى التواصل مع فريق الدعم الفني.'
+      );
+    });
+  });
 });

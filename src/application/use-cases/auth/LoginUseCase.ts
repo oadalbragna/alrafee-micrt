@@ -43,6 +43,9 @@ export interface LoginOutput {
   message?: string | undefined;
 }
 
+// Precomputed cost-10 bcrypt hash used when user is not found to mitigate timing enumeration attacks
+const DUMMY_PASSWORD_HASH = '$2b$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy';
+
 export class LoginUseCase {
   constructor(
     private readonly userRepository: IUserRepository,
@@ -63,6 +66,7 @@ export class LoginUseCase {
       : await this.userRepository.findByUsername(trimmedIdentifier);
 
     if (!user) {
+      await verifyPassword(input.password, DUMMY_PASSWORD_HASH);
       throw new InvalidCredentialsException('بيانات الدخول غير صحيحة');
     }
 
