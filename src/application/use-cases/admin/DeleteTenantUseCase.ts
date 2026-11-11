@@ -34,13 +34,19 @@ export class DeleteTenantUseCase {
       throw new Error('لا يمكن حذف الحساب الافتراضي للمنصة');
     }
 
-    // Soft delete: sets isDeleted=true, deletedAt=now, does NOT delete database rows
+    // Preserve current subscriptionStatus so restore can recover it
+    const previousStatus = tenant.subscriptionStatus !== 'SUSPENDED'
+      ? tenant.subscriptionStatus
+      : (tenant.previousSubscriptionStatus ?? 'ACTIVE');
+
+    // Soft delete (archive): sets isDeleted=true, deletedAt=now, status=INACTIVE, and saves previousSubscriptionStatus
     const updated = await this.prisma.tenant.update({
       where: { id: input.tenantId },
       data: {
         isDeleted: true,
         deletedAt: new Date(),
         status: 'INACTIVE',
+        previousSubscriptionStatus: previousStatus,
       },
     });
 

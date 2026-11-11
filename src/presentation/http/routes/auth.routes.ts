@@ -8,13 +8,14 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { FastifyInstance, FastifyPluginAsync } from 'fastify';
-import { loginSchema, forgotPasswordSchema, resetPasswordSchema, verifyDeviceOtpSchema } from '../../validators/auth.validator.js';
+import { loginSchema, forgotPasswordSchema, resetPasswordSchema, verifyDeviceOtpSchema, deleteAccountSchema } from '../../validators/auth.validator.js';
 import { registerSchema } from '../../validators/register.validator.js';
 import { LoginUseCase } from '../../../application/use-cases/auth/LoginUseCase.js';
 import { VerifyDeviceOtpUseCase } from '../../../application/use-cases/auth/VerifyDeviceOtpUseCase.js';
 import { RegisterTenantUseCase } from '../../../application/use-cases/auth/RegisterTenantUseCase.js';
 import { RequestPasswordResetUseCase } from '../../../application/use-cases/auth/RequestPasswordResetUseCase.js';
 import { ResetPasswordWithOtpUseCase } from '../../../application/use-cases/auth/ResetPasswordWithOtpUseCase.js';
+import { DeleteOwnAccountUseCase, ForbiddenAccountDeletionException } from '../../../application/use-cases/auth/DeleteOwnAccountUseCase.js';
 import { PrismaUserRepository } from '../../../infrastructure/database/repositories/PrismaUserRepository.js';
 import { AuditLogger } from '../../../infrastructure/logging/AuditLogger.js';
 import { InvalidCredentialsException } from '../../../domain/exceptions/InvalidCredentialsException.js';
@@ -38,6 +39,7 @@ export const authRoutes: FastifyPluginAsync = async (
   const registerTenantUseCase = new RegisterTenantUseCase(undefined, auditLogger);
   const requestPasswordResetUseCase = new RequestPasswordResetUseCase();
   const resetPasswordWithOtpUseCase = new ResetPasswordWithOtpUseCase(undefined, auditLogger);
+  const deleteOwnAccountUseCase = new DeleteOwnAccountUseCase(undefined, auditLogger);
 
   // --------------------------------------------------------------------------
   // POST /api/v1/auth/login
@@ -674,6 +676,62 @@ export const authRoutes: FastifyPluginAsync = async (
         success: false,
         errorCode: 'INTERNAL_ERROR',
         errorMessage: err.message || 'فشل تحديث بيانات الملف الشخصي',
+      });
+    }
+  });
+
+  // --------------------------------------------------------------------------
+  // POST /api/v1/auth/delete-account
+  // Self-service account deletion/archiving (requires password confirmation)
+  // --------------------------------------------------------------------------
+  fastify.post('/delete-account', { preHandler: authMiddleware }, async (request, reply) => {
+    const parseResult = deleteAccountSchema.safeParse(request.body);
+
+    if (!parseResult.success) {
+      return reply.status(400).send({
+        success: false,
+        errorCode: 'VALIDATION_ERROR',
+        errorMessage: 'يرجى إدخال كلمة المرور لتأكيد حذف الحساب',
+        details: parseResult.error.flatten().fieldErrors,
+      });
+    }
+
+    try {
+      const { userId, tenantId, role } = request.user!;
+      const result = await deleteOwnAccountUseCase.execute({
+        userId,
+        tenantId,
+        role,
+        password: parseResult.data.password,
+      });
+
+      return reply.status(200).send({
+        success: true,
+        data: result,
+        message: result.message,
+      });
+    } catch (err: any) {
+      if (err instanceof InvalidCredentialsException || err.name === 'InvalidCredentialsException') {
+        return reply.status(401).send({
+          success: false,
+          errorCode: 'INVALID_CREDENTIALS',
+          errorMessage: err.message,
+        });
+      }
+
+      if (err instanceof ForbiddenAccountDeletionException || err.name === 'ForbiddenAccountDeletionException') {
+        return reply.status(403).send({
+          success: false,
+          errorCode: err.errorCode || 'FORBIDDEN',
+          errorMessage: err.message,
+        });
+      }
+
+      fastify.log.error(err, 'Failed to process self-service account deletion');
+      return reply.status(400).send({
+        success: false,
+        errorCode: 'OPERATION_FAILED',
+        errorMessage: err.message || 'فشل تنفيذ طلب حذف الحساب',
       });
     }
   });

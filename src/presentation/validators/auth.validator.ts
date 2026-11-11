@@ -42,3 +42,10 @@ export const resetPasswordSchema = z.object({
 
 export type ResetPasswordInputDto = z.infer<typeof resetPasswordSchema>;
 
+export const deleteAccountSchema = z.object({
+  password: z.string().min(1, 'كلمة المرور مطلوبة لتأكيد حذف الحساب'),
+});
+
+export type DeleteAccountInputDto = z.infer<typeof deleteAccountSchema>;
+
+

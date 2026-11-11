@@ -212,7 +212,7 @@ describe('LoginUseCase Unit Tests', () => {
     );
   });
 
-  it('should reject inactive/suspended users with clear message', async () => {
+  it('should reject inactive/suspended users with clear message when password is correct', async () => {
     userRepo.users[0].status = 'INACTIVE';
 
     await assert.rejects(
@@ -225,6 +225,24 @@ describe('LoginUseCase Unit Tests', () => {
       (err: any) => {
         assert.ok(err instanceof InactiveUserException);
         assert.strictEqual(err.message, 'هذا الحساب معطل، يرجى التواصل مع مسؤول النظام');
+        return true;
+      }
+    );
+  });
+
+  it('should reject inactive user with InvalidCredentialsException when password is wrong (password checked first)', async () => {
+    userRepo.users[0].status = 'INACTIVE';
+
+    await assert.rejects(
+      async () => {
+        await loginUseCase.execute({
+          username: 'admin',
+          password: 'WrongPassword999!',
+        });
+      },
+      (err: any) => {
+        assert.ok(err instanceof InvalidCredentialsException);
+        assert.strictEqual(err.message, 'بيانات الدخول غير صحيحة');
         return true;
       }
     );
